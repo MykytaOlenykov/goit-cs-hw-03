@@ -17,17 +17,13 @@ def format_data_into_dict(columns, data):
     return result
 
 
-def get_task_by_id(conn, task_id):
-    sql = f"""
-    select * from tasks
-    where id = {task_id};
-    """
+def get_data(conn, sql, params=None):
+    data = None
 
-    task = None
     c = conn.cursor()
     try:
-        c.execute(sql)
-        task = c.fetchone()
+        c.execute(sql, params)
+        data = c.fetchall()
     except DatabaseError as er:
         logging.error(f"Database error: {er}")
     finally:
@@ -35,94 +31,101 @@ def get_task_by_id(conn, task_id):
 
     columns = [description[0] for description in c.description]
 
-    if task:
-        return format_data_into_dict(columns, [task])[0]
+    if data:
+        return format_data_into_dict(columns, data)
+    else:
+        return None
 
-    return None
 
-
-def get_tasks_by_user_id(conn, user_id):
-    sql = f"""
-    select * from tasks
-    where user_id = {user_id}; 
-    """
-
-    rows = []
+def create_data(conn, sql, params=None):
+    id = None
     c = conn.cursor()
     try:
-        c.execute(sql)
-        rows = c.fetchall()
-    except DatabaseError as er:
-        logging.error(f"Database error: {er}")
-    finally:
-        c.close()
-
-    columns = [description[0] for description in c.description]
-    return format_data_into_dict(columns, rows)
-
-
-def get_tasks_by_status(conn, status):
-    sql = f"""
-    select * from tasks
-    where status_id in (select id from status where name = '{status}');
-    """
-
-    rows = []
-    c = conn.cursor()
-    try:
-        c.execute(sql)
-        rows = c.fetchall()
-    except DatabaseError as er:
-        logging.error(f"Database error: {er}")
-    finally:
-        c.close()
-
-    columns = [description[0] for description in c.description]
-    return format_data_into_dict(columns, rows)
-
-
-def change_task_status(conn, task_id, new_status_id):
-    sql = f"""
-    update tasks
-    set status_id = {new_status_id}
-    where id = {task_id};
-    """
-
-    updated_task = None
-
-    c = conn.cursor()
-    try:
-        c.execute(sql)
+        c.execute(sql, params)
         conn.commit()
-
-        updated_task = get_task_by_id(conn, task_id)
+        id = c.fetchone()[0]
     except DatabaseError as er:
         logging.error(f"Database error: {er}")
         conn.rollback()
     finally:
         c.close()
 
-    return updated_task
+    return id
+
+
+def change_data(conn, sql, params=None):
+    c = conn.cursor()
+    try:
+        c.execute(sql, params)
+        conn.commit()
+    except DatabaseError as er:
+        logging.error(f"Database error: {er}")
+        conn.rollback()
+    finally:
+        c.close()
+
+
+def delete_data(conn, sql, params=None):
+    is_deleted = False
+    c = conn.cursor()
+    try:
+        c.execute(sql, params)
+        is_deleted = c.rowcount > 0
+        conn.commit()
+    except DatabaseError as er:
+        logging.error(f"Database error: {er}")
+        conn.rollback()
+    finally:
+        c.close()
+
+    return is_deleted
+
+
+def get_task_by_id(conn, task_id):
+    sql = """
+    select * from tasks
+    where id = %s;
+    """
+
+    return get_data(conn, sql, (task_id,))
+
+
+def get_tasks_by_user_id(conn, user_id):
+    sql = """
+    select * from tasks
+    where user_id = %s; 
+    """
+
+    return get_data(conn, sql, (user_id,))
+
+
+def get_tasks_by_status(conn, status):
+    sql = """
+    select * from tasks
+    where status_id in (select id from status where name = %s);
+    """
+
+    return get_data(conn, sql, (status,))
+
+
+def change_task_status(conn, task_id, new_status_id):
+    sql = """
+    update tasks
+    set status_id = %s
+    where id = %s;
+    """
+
+    change_data(conn, sql, (new_status_id, task_id))
+    return get_task_by_id(conn, task_id)
 
 
 def get_users_without_tasks(conn):
-    sql = f"""
+    sql = """
     select * from users
     where id not in (select user_id from tasks where user_id = users.id); 
     """
 
-    rows = []
-    c = conn.cursor()
-    try:
-        c.execute(sql)
-        rows = c.fetchall()
-    except DatabaseError as er:
-        logging.error(f"Database error: {er}")
-    finally:
-        c.close()
-
-    columns = [description[0] for description in c.description]
-    return format_data_into_dict(columns, rows)
+    return get_data(conn, sql)
 
 
 def create_task(conn, new_task: Task):
@@ -132,162 +135,73 @@ def create_task(conn, new_task: Task):
     RETURNING id;
     """
 
-    created_task = None
-    c = conn.cursor()
-    try:
-        c.execute(
-            sql,
-            (
-                new_task.title,
-                new_task.description,
-                new_task.status_id,
-                new_task.user_id,
-            ),
-        )
-        conn.commit()
-        task_id = c.fetchone()[0]
-        created_task = get_task_by_id(conn, task_id)
-    except DatabaseError as er:
-        logging.error(f"Database error: {er}")
-        conn.rollback()
-    finally:
-        c.close()
-
-    return created_task
+    id = create_data(
+        conn,
+        sql,
+        (new_task.title, new_task.description, new_task.status_id, new_task.user_id),
+    )
+    return get_task_by_id(conn, id)
 
 
 def get_not_completed_tasks(conn):
-    sql = f"""
+    sql = """
     select * from tasks
     where not status_id = 3;
     """
 
-    rows = []
-    c = conn.cursor()
-    try:
-        c.execute(sql)
-        rows = c.fetchall()
-    except DatabaseError as er:
-        logging.error(f"Database error: {er}")
-    finally:
-        c.close()
-
-    columns = [description[0] for description in c.description]
-    return format_data_into_dict(columns, rows)
+    return get_data(conn, sql)
 
 
 def delete_task_by_id(conn, task_id):
-    sql = f"""
-    delete from tasks where id = {task_id};
+    sql = """
+    delete from tasks where id = %s;
     """
 
-    info = None
-    c = conn.cursor()
-    try:
-        c.execute(sql)
-        deleted_rows = c.rowcount
-        conn.commit()
+    is_deleted = delete_data(conn, sql, (task_id,))
 
-        if deleted_rows > 0:
-            return f"Task with {task_id} id deleted"
-        else:
-            return f"No task found with {task_id} id"
-    except DatabaseError as er:
-        logging.error(f"Database error: {er}")
-        conn.rollback()
-    finally:
-        c.close()
-
-    return info
+    if is_deleted > 0:
+        return f"Task with {task_id} id deleted"
+    else:
+        return f"No task found with {task_id} id"
 
 
 def get_user_by_id(conn, user_id):
-    sql = f"""
+    sql = """
     select * from users
-    where id = {user_id};
+    where id = %s;
     """
 
-    user = None
-    c = conn.cursor()
-    try:
-        c.execute(sql)
-        user = c.fetchone()
-    except DatabaseError as er:
-        logging.error(f"Database error: {er}")
-    finally:
-        c.close()
-
-    columns = [description[0] for description in c.description]
-
-    if user:
-        return format_data_into_dict(columns, [user])[0]
-
-    return None
+    return get_data(conn, sql, (user_id,))
 
 
 def get_users_by_email(conn, email):
-    sql = f"""
+    sql = """
     select * from users where email like %s;
     """
 
-    rows = []
-    c = conn.cursor()
-    try:
-        c.execute(sql, (f"%{email}%",))
-        rows = c.fetchall()
-    except DatabaseError as er:
-        logging.error(f"Database error: {er}")
-    finally:
-        c.close()
-
-    columns = [description[0] for description in c.description]
-    return format_data_into_dict(columns, rows)
+    return get_data(conn, sql, (f"%{email}%",))
 
 
 def change_user_name(conn, user_id, new_user_name):
-    sql = f"""
+    sql = """
     update users
-    set fullname = '{new_user_name}'
-    where id = {user_id};
+    set fullname = %s
+    where id = %s;
     """
 
-    updated_user = None
-
-    c = conn.cursor()
-    try:
-        c.execute(sql)
-        conn.commit()
-
-        updated_user = get_user_by_id(conn, user_id)
-    except DatabaseError as er:
-        logging.error(f"Database error: {er}")
-        conn.rollback()
-    finally:
-        c.close()
-
-    return updated_user
+    change_data(conn, sql, (new_user_name, user_id))
+    return get_user_by_id(conn, user_id)
 
 
 def get_count_tasks_by_status(conn):
-    sql = f"""
+    sql = """
     select s.id, s.name, count(*) as task_count from tasks t
     left join status s on t.status_id = s.id
     group by s.id
     order by s.id;
     """
 
-    rows = []
-    c = conn.cursor()
-    try:
-        c.execute(sql)
-        rows = c.fetchall()
-    except DatabaseError as er:
-        logging.error(f"Database error: {er}")
-    finally:
-        c.close()
-
-    columns = [description[0] for description in c.description]
-    return format_data_into_dict(columns, rows)
+    return get_data(conn, sql)
 
 
 def get_tasks_by_user_email_domain(conn, domain):
@@ -298,38 +212,16 @@ def get_tasks_by_user_email_domain(conn, domain):
     where u.email like %s;
     """
 
-    rows = []
-    c = conn.cursor()
-    try:
-        c.execute(sql, (f"%{domain}",))
-        rows = c.fetchall()
-    except DatabaseError as er:
-        logging.error(f"Database error: {er}")
-    finally:
-        c.close()
-
-    columns = [description[0] for description in c.description]
-    return format_data_into_dict(columns, rows)
+    return get_data(conn, sql, (f"%{domain}",))
 
 
 def get_tasks_without_description(conn):
-    sql = f"""
+    sql = """
     select * from tasks
     where description is null;
     """
 
-    rows = []
-    c = conn.cursor()
-    try:
-        c.execute(sql)
-        rows = c.fetchall()
-    except DatabaseError as er:
-        logging.error(f"Database error: {er}")
-    finally:
-        c.close()
-
-    columns = [description[0] for description in c.description]
-    return format_data_into_dict(columns, rows)
+    return get_data(conn, sql)
 
 
 def get_users_and_tasks_by_status(conn, status):
@@ -341,18 +233,7 @@ def get_users_and_tasks_by_status(conn, status):
     )
     """
 
-    rows = []
-    c = conn.cursor()
-    try:
-        c.execute(sql, (status,))
-        rows = c.fetchall()
-    except DatabaseError as er:
-        logging.error(f"Database error: {er}")
-    finally:
-        c.close()
-
-    columns = [description[0] for description in c.description]
-    return format_data_into_dict(columns, rows)
+    return get_data(conn, sql, (status,))
 
 
 def get_count_tasks_by_users(conn):
@@ -362,56 +243,80 @@ def get_count_tasks_by_users(conn):
     group by u.id;
     """
 
-    rows = []
-    c = conn.cursor()
-    try:
-        c.execute(sql)
-        rows = c.fetchall()
-    except DatabaseError as er:
-        logging.error(f"Database error: {er}")
-    finally:
-        c.close()
-
-    columns = [description[0] for description in c.description]
-    return format_data_into_dict(columns, rows)
+    return get_data(conn, sql)
 
 
 if __name__ == "__main__":
     try:
         with create_connect() as conn:
-            # tasks = get_tasks_by_user_id(conn, 1)
-            # pprint(tasks)
+            """
+            Отримати всі завдання певного користувача. Використайте SELECT для отримання завдань конкретного користувача за його user_id.
+            """
+            # pprint(get_tasks_by_user_id(conn, 1))
 
-            # tasks = get_tasks_by_status(conn, "new")
-            # pprint(tasks)
+            """Вибрати завдання за певним статусом. Використайте підзапит для вибору завдань з конкретним статусом, наприклад, 'new'."""
+            # pprint(get_tasks_by_status(conn, "new"))
 
-            # updated_task = change_task_status(conn, 1, 1)
-            # pprint(updated_task)
+            """
+            Оновити статус конкретного завдання. Змініть статус конкретного завдання на 'in progress' або інший статус.
+            """
+            # pprint(change_task_status(conn, 1, 2))
 
-            # users = get_users_without_tasks(conn)
-            # pprint(users)
+            """
+            Отримати список користувачів, які не мають жодного завдання. Використайте комбінацію SELECT, WHERE NOT IN і підзапит.
+            """
+            # pprint(get_users_without_tasks(conn))
 
-            # new_task = create_task(conn, Task("new task", "complete a new task", 1))
-            # pprint(new_task)
+            """
+            Додати нове завдання для конкретного користувача. Використайте INSERT для додавання нового завдання.
+            """
+            # pprint(create_task(conn, Task("new task", "complete a new task", 1)))
 
-            # tasks = get_not_completed_tasks(conn)
-            # pprint(tasks)
+            """
+            Отримати всі завдання, які ще не завершено. Виберіть завдання, чий статус не є 'завершено'.
+            """
+            # pprint(get_not_completed_tasks(conn))
 
-            # print(delete_task_by_id(conn, 102))
+            """
+            Видалити конкретне завдання. Використайте DELETE для видалення завдання за його id.
+            """
+            # print(delete_task_by_id(conn, 105))
 
+            """
+            Знайти користувачів з певною електронною поштою. Використайте SELECT із умовою LIKE для фільтрації за електронною поштою.
+            """
             # pprint(get_users_by_email(conn, ".com"))
 
-            # pprint(change_user_name(conn, 1, "Tomato Tomatovich"))
+            """
+            Оновити ім'я користувача. Змініть ім'я користувача за допомогою UPDATE.
+            """
+            # pprint(change_user_name(conn, 1, "Mango Mangovich"))
 
-            # pprint(get_count_tasks_by_status(conn))
+            """
+            Отримати кількість завдань для кожного статусу. Використайте SELECT, COUNT, GROUP BY для групування завдань за статусами.
 
+            """
+            pprint(get_count_tasks_by_status(conn))
+
+            """
+            Отримати завдання, які призначені користувачам з певною доменною частиною електронної пошти. Використайте SELECT з умовою LIKE в поєднанні з JOIN, щоб вибрати завдання, призначені користувачам, чия електронна пошта містить певний домен (наприклад, '%@example.com').
+            """
             # pprint(get_tasks_by_user_email_domain(conn, "@example.com"))
 
+            """
+            Отримати список завдань, що не мають опису. Виберіть завдання, у яких відсутній опис.
+            """
             # pprint(get_tasks_without_description(conn))
 
+            """
+            Вибрати користувачів та їхні завдання, які є у статусі 'in progress'. Використайте INNER JOIN для отримання списку користувачів та їхніх завдань із певним статусом.
+            """
             # pprint(get_users_and_tasks_by_status(conn, "new"))
 
-            pprint(get_count_tasks_by_users(conn))
+            """
+            Отримати користувачів та кількість їхніх завдань. Використайте LEFT JOIN та GROUP BY для вибору користувачів та підрахунку їхніх завдань.
+            """
+            # pprint(get_count_tasks_by_users(conn))
 
     except RuntimeError as er:
         logging.error(f"Runtime error: {er}")

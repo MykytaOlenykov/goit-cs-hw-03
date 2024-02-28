@@ -56,7 +56,7 @@ if __name__ == "__main__":
                 description = fake.text(max_nb_chars=200, ext_word_list=None)
                 status_id = randint(1, 3)
                 user_id = randint(1, 20)
-                task = Task(title, description, status_id, user_id)
+                task = Task(title, description, user_id, status_id)
                 create_task(conn, task)
     except RuntimeError as er:
         logging.error(f"Runtime error: {er}")
